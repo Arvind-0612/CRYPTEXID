@@ -1,9 +1,10 @@
+
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { MapPin, Mic, MicOff, Search, Car, Navigation, Clock, Shield } from "lucide-react";
+import { MapPin, Mic, MicOff, Search, Car, Navigation, Clock, Shield, AlertTriangle, CheckCircle, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import MapComponent from "./MapComponent";
 import VoiceAssistant from "./VoiceAssistant";
@@ -19,6 +20,14 @@ interface ParkingSlot {
   features: string[];
 }
 
+interface SecurityAlert {
+  id: string;
+  type: 'movement' | 'tamper' | 'emergency';
+  message: string;
+  timestamp: Date;
+  severity: 'low' | 'medium' | 'high';
+}
+
 interface DashboardProps {
   user: { username: string; vehicleNumber: string };
   onLogout: () => void;
@@ -29,7 +38,13 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSlot, setSelectedSlot] = useState<ParkingSlot | null>(null);
   const [isListening, setIsListening] = useState(false);
-  const [isVehicleSecure, setIsVehicleSecure] = useState(true);
+  const [securityAlerts, setSecurityAlerts] = useState<SecurityAlert[]>([]);
+  const [isVehicleParked, setIsVehicleParked] = useState(false);
+  const [showBookingModal, setShowBookingModal] = useState(false);
+  const [bookingSlot, setBookingSlot] = useState<ParkingSlot | null>(null);
+  const [showSecurityModal, setShowSecurityModal] = useState(false);
+  const [currentAlert, setCurrentAlert] = useState<SecurityAlert | null>(null);
+  const [lastMovement, setLastMovement] = useState<Date | null>(null);
   const { toast } = useToast();
 
   // Mock parking data
@@ -76,22 +91,51 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
     }
   ]);
 
-  // Security monitoring simulation
+  // Enhanced security monitoring with real-time simulation
   useEffect(() => {
-    const securityCheck = setInterval(() => {
-      // Simulate random security alert (for demo)
-      if (Math.random() < 0.01 && selectedSlot) { // 1% chance every interval
-        setIsVehicleSecure(false);
-        toast({
-          title: "🚨 Security Alert!",
-          description: `Unauthorized movement detected for vehicle ${user.vehicleNumber} in ${selectedSlot.name}`,
-          variant: "destructive",
-        });
-      }
-    }, 5000);
+    if (!isVehicleParked || !selectedSlot) return;
 
-    return () => clearInterval(securityCheck);
-  }, [selectedSlot, user.vehicleNumber, toast]);
+    const securityInterval = setInterval(() => {
+      const now = new Date();
+      
+      // Simulate various security scenarios
+      const scenarios = [
+        { type: 'movement', chance: 0.02, severity: 'medium', message: 'Unauthorized vehicle movement detected' },
+        { type: 'tamper', chance: 0.01, severity: 'high', message: 'Vehicle tampering attempt detected' },
+        { type: 'emergency', chance: 0.005, severity: 'high', message: 'Emergency button pressed in parking area' }
+      ];
+
+      scenarios.forEach(scenario => {
+        if (Math.random() < scenario.chance) {
+          const alert: SecurityAlert = {
+            id: `alert_${Date.now()}_${Math.random()}`,
+            type: scenario.type as 'movement' | 'tamper' | 'emergency',
+            message: `${scenario.message} for vehicle ${user.vehicleNumber} in ${selectedSlot.name}`,
+            timestamp: now,
+            severity: scenario.severity as 'low' | 'medium' | 'high'
+          };
+
+          setSecurityAlerts(prev => [alert, ...prev.slice(0, 4)]); // Keep last 5 alerts
+          setCurrentAlert(alert);
+          setShowSecurityModal(true);
+          setLastMovement(now);
+
+          // Play alert sound and vibrate if supported
+          if ('vibrate' in navigator) {
+            navigator.vibrate([200, 100, 200]);
+          }
+
+          toast({
+            title: `🚨 ${scenario.severity.toUpperCase()} SECURITY ALERT!`,
+            description: alert.message,
+            variant: "destructive",
+          });
+        }
+      });
+    }, 3000); // Check every 3 seconds for demo
+
+    return () => clearInterval(securityInterval);
+  }, [isVehicleParked, selectedSlot, user.vehicleNumber, toast]);
 
   const filteredSlots = parkingSlots.filter(slot =>
     slot.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -99,29 +143,78 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
   );
 
   const handleBookSlot = (slot: ParkingSlot) => {
-    setSelectedSlot(slot);
-    setIsVehicleSecure(true);
-    toast({
-      title: "🎉 Slot Booked Successfully!",
-      description: `Your parking spot at ${slot.name} has been reserved. Vehicle ${user.vehicleNumber} is now being monitored.`,
-    });
+    setBookingSlot(slot);
+    setShowBookingModal(true);
+  };
+
+  const confirmBooking = () => {
+    if (bookingSlot) {
+      setSelectedSlot(bookingSlot);
+      setIsVehicleParked(true);
+      setShowBookingModal(false);
+      setSecurityAlerts([]);
+      
+      // Create initial security confirmation
+      const confirmAlert: SecurityAlert = {
+        id: `confirm_${Date.now()}`,
+        type: 'movement',
+        message: `Vehicle ${user.vehicleNumber} successfully parked in ${bookingSlot.name}`,
+        timestamp: new Date(),
+        severity: 'low'
+      };
+      setSecurityAlerts([confirmAlert]);
+
+      toast({
+        title: "🎉 Slot Booked Successfully!",
+        description: `Your parking spot at ${bookingSlot.name} has been reserved. Security monitoring activated.`,
+      });
+    }
   };
 
   const handleNavigate = (slot: ParkingSlot) => {
-    setCurrentView("map");
-    setSelectedSlot(slot);
+    // Open Google Maps with directions
+    const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${slot.location.lat},${slot.location.lng}&travelmode=driving`;
+    window.open(googleMapsUrl, '_blank');
+    
     toast({
       title: "🗺️ Navigation Started",
-      description: `Routing to ${slot.name}...`,
+      description: `Opening Google Maps directions to ${slot.name}...`,
     });
   };
 
-  const confirmVehicleMovement = () => {
-    setIsVehicleSecure(true);
-    toast({
-      title: "✅ Movement Confirmed",
-      description: "Vehicle movement has been authorized.",
-    });
+  const handleSecurityAction = (action: 'confirm' | 'emergency' | 'dismiss') => {
+    if (!currentAlert) return;
+
+    switch (action) {
+      case 'confirm':
+        toast({
+          title: "✅ Movement Confirmed",
+          description: "Vehicle movement has been authorized.",
+        });
+        break;
+      case 'emergency':
+        toast({
+          title: "🚨 Emergency Services Contacted",
+          description: "Local security and emergency services have been notified.",
+        });
+        // In real app, this would contact emergency services
+        break;
+      case 'dismiss':
+        toast({
+          title: "Alert Dismissed",
+          description: "Security alert has been dismissed.",
+        });
+        break;
+    }
+    
+    setShowSecurityModal(false);
+    setCurrentAlert(null);
+  };
+
+  const getAlertIcon = (type: string, severity: string) => {
+    if (severity === 'high') return <AlertTriangle className="h-4 w-4 text-red-500" />;
+    if (type === 'movement') return <Car className="h-4 w-4 text-yellow-500" />;
+    return <Shield className="h-4 w-4 text-blue-500" />;
   };
 
   const renderParkingSlots = () => (
@@ -180,6 +273,93 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-secondary to-background">
+      {/* Booking Modal */}
+      {showBookingModal && bookingSlot && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle className="text-center">🎉 Slot Booked!</CardTitle>
+              <CardDescription className="text-center">
+                Confirm your booking at {bookingSlot.name}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="text-center space-y-2">
+                <p><strong>Location:</strong> {bookingSlot.name}</p>
+                <p><strong>Distance:</strong> {bookingSlot.distance} km</p>
+                <p><strong>Price:</strong> ${bookingSlot.price}/hour</p>
+                <p><strong>Available:</strong> {bookingSlot.available} spots</p>
+              </div>
+              <div className="flex gap-3">
+                <Button 
+                  variant="book" 
+                  className="flex-1" 
+                  onClick={confirmBooking}
+                >
+                  <CheckCircle className="h-4 w-4" />
+                  Confirm Booking
+                </Button>
+                <Button 
+                  variant="outline" 
+                  className="flex-1"
+                  onClick={() => setShowBookingModal(false)}
+                >
+                  <X className="h-4 w-4" />
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Security Alert Modal */}
+      {showSecurityModal && currentAlert && (
+        <div className="fixed inset-0 bg-red-900/30 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <Card className="w-full max-w-md border-red-500 shadow-2xl animate-pulse">
+            <CardHeader className="bg-red-50 dark:bg-red-950">
+              <CardTitle className="text-center text-red-700 dark:text-red-300 flex items-center justify-center gap-2">
+                {getAlertIcon(currentAlert.type, currentAlert.severity)}
+                🚨 SECURITY ALERT
+              </CardTitle>
+              <CardDescription className="text-center text-red-600 dark:text-red-400">
+                {currentAlert.message}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-4">
+              <div className="text-center text-sm text-muted-foreground">
+                <p><strong>Time:</strong> {currentAlert.timestamp.toLocaleTimeString()}</p>
+                <p><strong>Severity:</strong> {currentAlert.severity.toUpperCase()}</p>
+              </div>
+              <div className="grid grid-cols-1 gap-2">
+                <Button 
+                  variant="default"
+                  onClick={() => handleSecurityAction('confirm')}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  <CheckCircle className="h-4 w-4" />
+                  Confirm It's Me
+                </Button>
+                <Button 
+                  variant="destructive"
+                  onClick={() => handleSecurityAction('emergency')}
+                >
+                  <AlertTriangle className="h-4 w-4" />
+                  Emergency!
+                </Button>
+                <Button 
+                  variant="outline"
+                  onClick={() => handleSecurityAction('dismiss')}
+                >
+                  <X className="h-4 w-4" />
+                  Dismiss Alert
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {/* Header */}
       <div className="border-b border-primary/20 bg-card/50 backdrop-blur-sm">
         <div className="container mx-auto px-4 py-4">
@@ -194,20 +374,27 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              {selectedSlot && (
-                <div className="flex items-center gap-2">
-                  <div className={`h-3 w-3 rounded-full ${isVehicleSecure ? 'bg-parking-available' : 'bg-parking-occupied animate-pulse'}`} />
-                  <span className="text-sm">
-                    {isVehicleSecure ? 'Vehicle Secure' : 'Security Alert!'}
-                  </span>
-                  {!isVehicleSecure && (
-                    <Button variant="outline" size="sm" onClick={confirmVehicleMovement}>
-                      <Shield className="h-4 w-4" />
-                      Confirm
-                    </Button>
-                  )}
-                </div>
-              )}
+              {/* Security Status */}
+              <div className="flex items-center gap-2">
+                <div className={`h-3 w-3 rounded-full ${
+                  !isVehicleParked ? 'bg-gray-400' :
+                  securityAlerts.length > 0 && securityAlerts[0].severity !== 'low' 
+                    ? 'bg-red-500 animate-pulse' 
+                    : 'bg-green-500'
+                }`} />
+                <span className="text-sm">
+                  {!isVehicleParked ? 'No Vehicle Parked' :
+                   securityAlerts.length > 0 && securityAlerts[0].severity !== 'low' 
+                     ? 'Security Alert!' 
+                     : 'Vehicle Secure'}
+                </span>
+                {securityAlerts.length > 0 && (
+                  <Badge variant="destructive" className="text-xs">
+                    {securityAlerts.length}
+                  </Badge>
+                )}
+              </div>
+
               <VoiceAssistant 
                 isListening={isListening}
                 onToggleListening={setIsListening}
@@ -228,6 +415,33 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
           </div>
         </div>
       </div>
+
+      {/* Security Alerts Panel */}
+      {securityAlerts.length > 0 && (
+        <div className="container mx-auto px-4 pt-4">
+          <Card className="border-orange-200 bg-orange-50 dark:bg-orange-950/20">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Shield className="h-4 w-4" />
+                Recent Security Activity
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2 max-h-24 overflow-y-auto">
+                {securityAlerts.slice(0, 3).map((alert) => (
+                  <div key={alert.id} className="flex items-center gap-2 text-xs">
+                    {getAlertIcon(alert.type, alert.severity)}
+                    <span className="flex-1 truncate">{alert.message}</span>
+                    <span className="text-muted-foreground">
+                      {alert.timestamp.toLocaleTimeString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Navigation */}
       <div className="container mx-auto px-4 py-4">
@@ -278,7 +492,7 @@ const Dashboard = ({ user, onLogout }: DashboardProps) => {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Navigation className="h-5 w-5" />
-                    Navigating to {selectedSlot.name}
+                    Current Parking: {selectedSlot.name}
                   </CardTitle>
                   <CardDescription>
                     {selectedSlot.distance} km away • {selectedSlot.available} spots available
